@@ -1,0 +1,493 @@
+---
+title: "Reproducability Study: \"Tasmanian devil cathelicidins exhibit anticancer activity against Devil Facial Tumour Disease (DFTD) cells\""
+date: 2024-05-20
+author:
+  - name: Arash Sal Moslehian
+    id: asm
+    email: arash.salmoslehian@epfl.ch
+    affiliation: 
+      - name: EPFL
+        city: Lausanne
+        state: Switzerland
+abstract: > 
+  The Tasmanian devil is endangered due to Devil Facial Tumour Disease (DFTD), a contagious cancer with no current treatment. Previous study has investigated the anticancer properties of Tasmanian devil cathelicidins which are antimicrobial peptides that may also have immunomodulatory and anticancer effects. Four cathelicidins (Saha-CATH3, 4, 5, and 6) significantly reduced cell viability and impacted gene expression related to DNA replication and cell cycle processes. This report intends to reproduce the enrichment analysis results of the study and further analyze their data. 
+keywords:
+  - Tasmanian Devil
+  - Cancer
+  - RNASeq
+format:
+  html:
+    code-fold: true
+    theme:
+    - default
+    - custom.scss
+  elsevier-pdf:
+    keep-tex: true 
+    journal:
+      name: ""
+      formatting: preprint
+      model: 5p
+      layout: onecolumn
+      cite-style: number
+  pdf:
+    papersize: a4paper
+    documentclass: article
+    classoption: twocolumn
+    keep-tex: true
+    geometry:
+      - top=10mm
+      - left=10mm
+      - right=10mm
+      - bottom=10mm
+execute:
+  echo: false
+  output: false
+bibliography: /home/arashsm79/Zotero/bib-library/MyLibrary.bib
+---
+
+```{r loading-libraries}
+setwd("/home/arashsm79/Playground/EPFL/course-data-2024/project/")
+options(scipen=999)
+
+if (!require("BiocManager", quietly = TRUE))
+  BiocManager::install("BiocManager")
+if (!require("limma", quietly = TRUE))
+  BiocManager::install("limma")
+library("limma")
+if (!require("edgeR", quietly = TRUE))
+  BiocManager::install("edgeR")
+library("edgeR")
+if (!require("EDASeq", quietly = TRUE))
+  BiocManager::install("EDASeq")
+library("EDASeq")
+if (!require("clusterProfiler", quietly = TRUE))
+  BiocManager::install("clusterProfiler")
+library("clusterProfiler")
+if (!require("rtracklayer", quietly = TRUE))
+  BiocManager::install("rtracklayer")
+library("rtracklayer")
+if (!require("GenomicFeatures", quietly = TRUE))
+  BiocManager::install("GenomicFeatures")
+library("GenomicFeatures")
+if (!require("enrichplot", quietly = TRUE))
+  BiocManager::install("enrichplot")
+library("enrichplot")
+if (!require("AnnotationDbi", quietly = TRUE))
+  BiocManager::install("AnnotationDbi")
+library("AnnotationDbi")
+if (!require("cowplot", quietly = TRUE))
+  install.packages("cowplot")
+library("cowplot")
+if (!require("dplyr", quietly = TRUE))
+  install.packages("dplyr")
+library("dplyr")
+# manually install an older version of human OrgDB
+if (!require("org.Hs.eg.db", quietly = TRUE))
+  install.packages("org.Hs.eg.db_3.12.0.tar.gz", repos = NULL, type = "source")
+library("org.Hs.eg.db")
+# remove.packages("org.Hs.eg.db")
+```
+
+```{r loading-data, eval=FALSE}
+#| eval: false
+# Here we read the data and setup some variables that are used throughout the document.
+myE_ge = read.csv("student_files/counts_final.csv")
+dup_gene_idx = which(myE_ge$GENE_ID == "Mar.02")[2]
+myE_ge <- myE_ge[-dup_gene_idx, ]
+rownames(myE_ge) = myE_ge$GENE_ID
+myE_ge = myE_ge[,7:length(colnames(myE_ge))]
+myE_ge = as.matrix(myE_ge)
+info = read.csv("student_files/Targets_SahaCATH.csv")
+info$Treatment =  gsub("-", "", info$Treatment)
+info$Treatment = factor(info$Treatment)
+```
+
+```{r variables}
+mycols_caths <- c("#CCFF00","#33CC33","#669999","#6699FF","#3300FF" ,"#990000", "#994400", "#CC33CC")
+mycols_samples <- rep(mycols_caths, each=3)
+```
+
+```{r preprocessing, eval=FALSE}
+#| eval: false
+# Preprocessing
+## Genes with equal or less than 50 counts across all samples were removed from the analysis
+gene_count_sum_across_samples = apply(myE_ge, 1, sum)
+n_before = nrow(myE_ge)
+myE_ge = myE_ge[gene_count_sum_across_samples > 50,]
+print(paste("Dropped rows: ", n_before - nrow(myE_ge), " Total: ", nrow(myE_ge)))
+
+## Firstly, the data was normalized by trimmed mean of M values (TMM) using edgeR
+dge <- DGEList(counts=myE_ge)
+dge <- calcNormFactors(dge, method="TMM")
+logCPM <- cpm(dge, log=TRUE)
+
+## Multidimensional scaling (MDS) was used to check for variation between treatments using limma
+plotMDS(logCPM, labels=info$Treatment, main="MDS Plot", col=mycols_samples)
+
+## Expression levels were then normalized using upper-quartile normalization in EDAseq
+normData <- betweenLaneNormalization(dge$counts, which="upper")
+boxplot(normData, col=mycols_samples)
+```
+
+```{r dge, eval=FALSE}
+#| eval: false
+# Differential expression analysis
+
+## Differential expression analysis was performed using voom in the limma
+dge <- DGEList(counts=normData, group=info$Treatment)
+design <- model.matrix(~ 0 + info$Treatment)
+colnames(design) = levels(info$Treatment)
+v <- voom(dge, design, plot=TRUE)
+
+# Fit linear model
+fit_lm <- lmFit(v, design)
+
+# Design the required contrasts
+contr <- makeContrasts(
+  ControlvsSaha1=SahaCATH1-Control,
+  ControlvsSaha2=SahaCATH2-Control,
+  ControlvsSaha3=SahaCATH3-Control,
+  ControlvsSaha4=SahaCATH4-Control,
+  ControlvsSaha5=SahaCATH5-Control,
+  ControlvsSaha6=SahaCATH6-Control,
+  ControlvsSaha7=SahaCATH7-Control,
+  levels = colnames(coef(fit_lm)))
+
+
+fit_contr <- contrasts.fit(fit_lm, contr)
+fit <- eBayes(fit_contr)
+```
+
+```{r dge-dataframe, eval=FALSE}
+#| eval: false
+# Reproducing the article's preprocessed dataframe
+
+dge_results = data.frame()
+
+for(coef_idx in 1:dim(fit$coefficients)[2]) {
+  results <- topTable(fit, coef=coef_idx, sort.by='none', adjust.method = "BH", number=Inf) # BH is an alias for FDR
+  if(ncol(dge_results) == 0){
+    dge_results = data.frame(setNames(data.frame(results$adj.P.Val), paste0("FDR.",colnames(fit$coefficients)[coef_idx])))
+  } else{
+    dge_results[[paste0("FDR.",colnames(fit$coefficients)[coef_idx])]] = results$adj.P.Val
+  }
+  dge_results[[paste0("logFC.",colnames(fit$coefficients)[coef_idx])]] = results$logFC
+}
+
+rownames(dge_results) = rownames(myE_ge)
+dge_coefficients = colnames(fit$coefficients)
+save(dge_results, dge_coefficients, file = "preprocessed.RData")
+```
+
+```{r load-dge-dataframe}
+load("preprocessed.RData")
+```
+
+```{r up-down-regulated}
+#| eval: true
+# Get the up and down-regulated genes
+
+## For each treatment, a false discovery rate (FDR) cutoff of 0.02 was applied and genes that were up or down-regulated greater than 1.5× fold were selected
+up_down_genes = as.list(rep(c(0), length(dge_coefficients)))
+names(up_down_genes) = dge_coefficients
+
+for(coef_idx in 1:length(dge_coefficients)) {
+  fdrs = dge_results[[paste0("FDR.", dge_coefficients[coef_idx])]]
+  logfcs = dge_results[[paste0("logFC.", dge_coefficients[coef_idx])]]
+  up_genes = rownames(dge_results[fdrs < 0.02 & logfcs >  log2(1.4948),])
+  down_genes = rownames(dge_results[fdrs < 0.02 & logfcs < -log2(1.4948),])
+  up_down_genes[[coef_idx]] = list(up_regulated_genes = up_genes, down_regulated_genes = down_genes)
+}
+```
+
+```{r loading-gff, eval=FALSE}
+#| eval: false
+## This is a gene annotation file for the Tasmanian Devil genome. This provides the human names of the genes that are present in the Tasmanian Devil, and would be useful to identity what the background genes are for your enrichment analysis.
+gff <- import.gff("student_files/GCF_000189315.1_Devil_ref_v7.0_genomic.gff")
+gff_df <- as.data.frame(gff)
+
+background_genes <- gff_df %>%
+  filter(type == "gene") %>%
+  select(gene)
+
+save(background_genes, file = "background_genes.RData")
+```
+
+```{r loading-background-genes}
+load("background_genes.RData")
+```
+
+```{r cath3-4-5,6, eval=FALSE}
+#| eval: false
+## Over-representation analysis of Biological Processes was conducted in clusterProfiler v3.18.157. Statistical signifi- cance was adjusted for multiple comparisons using the Benjamini–Hochberg method, and terms were considered significant when p-adj \< 0.05.
+ego_cath3_down <- enrichGO(
+                gene          = up_down_genes$ControlvsSaha3$down_regulated_genes,
+                OrgDb         = org.Hs.eg.db,
+                universe      = background_genes$gene,
+                keyType       = "SYMBOL",
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.05,
+                maxGSSize     = 200,
+                readable      = TRUE)
+
+ego_cath4_down <- enrichGO(
+                gene          = up_down_genes$ControlvsSaha4$down_regulated_genes,
+                OrgDb         = org.Hs.eg.db,
+                universe      = background_genes$gene,
+                keyType       = "SYMBOL",
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.05,
+                maxGSSize     = 200,
+                readable      = TRUE)
+
+ego_cath5_down <- enrichGO(
+                gene          = up_down_genes$ControlvsSaha5$down_regulated_genes,
+                OrgDb         = org.Hs.eg.db,
+                universe      = background_genes$gene,
+                keyType       = "SYMBOL",
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.05,
+                maxGSSize     = 200,
+                readable      = TRUE)
+
+ego_cath6_down <- enrichGO(
+                gene          = up_down_genes$ControlvsSaha6$down_regulated_genes,
+                OrgDb         = org.Hs.eg.db,
+                universe      = background_genes$gene,
+                keyType       = "SYMBOL",
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.05,
+                maxGSSize     = 200,
+                readable      = TRUE)
+
+ego_cath6_up <- enrichGO(
+                gene          = up_down_genes$ControlvsSaha6$up_regulated_genes,
+                OrgDb         = org.Hs.eg.db,
+                universe      = background_genes$gene,
+                keyType       = "SYMBOL",
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.05,
+                maxGSSize     = 200,
+                readable      = TRUE)
+
+## To remove general terms, gene sets larger than 200 were removed, and the simplify function was used to remove redundant GO terms.
+# Remove redundant GO terms
+ego_cath3_down <- clusterProfiler::simplify(ego_cath3_down)
+ego_cath4_down <- clusterProfiler::simplify(ego_cath4_down)
+ego_cath5_down <- clusterProfiler::simplify(ego_cath5_down)
+ego_cath6_down <- clusterProfiler::simplify(ego_cath6_down)
+ego_cath6_up   <- clusterProfiler::simplify(ego_cath6_up)
+
+save(ego_cath3_down, ego_cath4_down, ego_cath5_down, ego_cath6_down, ego_cath6_up, file = "go_analysis.RData")
+```
+
+# Introduction
+The Tasmanian devil (Sarcophilus harrisii) is endangered due to Devil Facial Tumour Disease (DFTD), a contagious cancer spread through biting that evades immune responses. Despite various attempts with medications and vaccines, no treatments have advanced to clinical trials.
+This study explores the anticancer potential of the devil's own cathelicidins which are antimicrobial peptides with diverse biological functions. To test their efficacy, researchers conducted a cytotoxicity assay on the DFT1 cell line 1426, using seven cathelicidins at different intervals. They found that four (Saha-CATH3, 4, 5, and 6) significantly reduced cell viability and caused stress.
+RNAseq analysis showed these peptides downregulated genes related to DNA replication and cell cycle progression, particularly noting that Saha-CATH5 also affected the ERBB and Hippo signaling pathways. This indicates that Saha-CATH5 might act similarly to Receptor Tyrosine Kinase (RTK) inhibitors, which are known to be effective against DFTD.
+These findings suggest that Tasmanian devil cathelicidins could have promising anti-cancer and immune-modulating properties, requiring further investigation as potential DFTD treatments. @petrohilosTasmanianDevilCathelicidins2023
+
+In this study, I first reproduce the Over-Representation Analysis (ORA) results from the original paper, and then augment the analysis with aditional discriptive plots and Gene Set Enrichment Analysis (GSEA). GSEA evaluates whether a particular gene set shows statistically significant differences in expression between two biological states, focusing on the entire distribution of gene expression rather than just the most differentially expressed genes.
+
+# Methods
+The previous study investigated the anticancer activity of Tasmanian devil cathelicidin peptides on DFT1 1426 cells using RNA sequencing (RNAseq).
+Confluent cells were treated with each peptide (Saha-CATH1 to 7) over 12, 18, 24, and 36 hours and RNA was extracted. Sequencing and pre-processing of 24 RNA samples, corresponding to three treaments per peptide, produced a set of gene counts. @petrohilosTasmanianDevilCathelicidins2023
+
+In this reproducability study, gene counts were utilized as input for differential expression analysis in R. There were seven conditions and one control each containing three samples. 
+To enhance biological relevance and statistical power, genes with fewer than 50 counts across all samples were excluded from the analysis. Initially, the data was normalized using the trimmed mean of M values (TMM) method in edgeR v`{r}  packageVersion("edgeR")`, which adjusts for composition bias between libraries and provides an effective library size for further analysis.
+To examine variation between treatments, multidimensional scaling (MDS) was conducted with limma v`{r}  packageVersion("limma")`. Subsequently, expression levels were normalized using upper-quartile normalization in EDAseq v`{r}  packageVersion("EDASeq")` to account for differences in sequencing depth and distribution across lanes. The differential expression analysis was then performed using the voom function in the limma v`{r}  packageVersion("limma")` package.
+For each treatment, a false discovery rate (FDR) cutoff of $0.02$ was applied, and genes with a fold change greater than $1.5$ (either upregulated or downregulated) were selected for further analysis. These genes were subjected to Gene Ontology (GO) and Gene Set Exrpession Analysis (GSEA). Both Over-representation analysis and Gene set expression analysis of Biological Processes were conducted using clusterProfiler v`{r}  packageVersion("clusterProfiler")`, with statistical significance adjusted for multiple comparisons via the Benjamini–Hochberg method.
+GO terms were considered significant when $\text{p-adj} < 0.05$, and to refine the results, gene sets larger than $200$ were removed, and redundant GO terms were eliminated using the simplify function with p-adj cutoff of $0.7$ using the Wang measure. 
+
+As the terms in Gene Ontology are constatly being updated and changed, reproducing the exact figures from the original paper might not be feasible. I tried different versions of `org.Hs.eg.db` package and version v`{r}  packageVersion("org.Hs.eg.db")` seems to be the one that matches the most.
+The simplification of similar terms can also be a factor of difference between the original paper and the reproduced results.
+Even though the original paper had reported a $1.5$ fold change, I found that in order to get the same numbers for differentially expressed genes as those outlined in the paper
+I had to tune the fold change threshold to $1.4948$. Moreover, the Mar-02 gene was duplicated in the dataset and the clone with the least amount of counts was manually removed. 
+
+
+# Results and Discussion
+
+Out of `{r} dim(dge_results)[1]` genes, `{r} length(unique(unlist(up_down_genes)))` showed differential expression (DE) across all seven treatments compared to the control.
+The Saha-CATH5 treatment had the highest number of DE genes, with `{r} length(unique(unlist(up_down_genes$ControlvsSaha5)))` (`{r} round((length(unique(unlist(up_down_genes$ControlvsSaha5))) / dim(dge_results)[1])*100, 2)`%).
+Other toxic treatments had lower DE percentages: Saha-CATH3 with `{r} length(unique(unlist(up_down_genes$ControlvsSaha3)))` (`{r} round((length(unique(unlist(up_down_genes$ControlvsSaha3))) / dim(dge_results)[1])*100, 2)`%), Saha-CATH4 with `{r} length(unique(unlist(up_down_genes$ControlvsSaha4)))` (`{r} round((length(unique(unlist(up_down_genes$ControlvsSaha4))) / dim(dge_results)[1])*100, 2)`%), and Saha-CATH6 with `{r} length(unique(unlist(up_down_genes$ControlvsSaha6)))` (`{r} round((length(unique(unlist(up_down_genes$ControlvsSaha6))) / dim(dge_results)[1])*100, 2)`%).
+The non-toxic treatments (Saha-CATH1, 2, and 7) showed less than 1% DE genes, with Saha-CATH7 showing none under the quality filters.
+
+Treating DFT1 cells with Saha-CATH3, 4, and 5 led to the suppression of genes involved in DNA replication, cell cycle progression, and checkpoints as confirmed by both GO (@fig-go345) and GSEA analysis (@fig-gsea-cath3). Saha-CATH5 also influenced the ERBB and Hippo signaling pathways. Saha-CATH6 induced Endoplasmic Reticulum (ER) stress in DFT1 cells through various mechanisms (glycosylation inhibition,  protein hydroxylation, and calcium depletion) according to GO analysis (@fig-go6). Additionally, Saha-CATH 6 upregulated genes linked with cytokine expression and immune signaling pathways.
+
+The volcano plots in @fig-volcano show that indeed we do not see much differentially expressed genes in Saha-CATH 1 and 7 treatment. Saha-CATH 5 shows large amounts of differentially downregulated genes which is in line with the fact that Saha-CATH5 displayed the most rapid cytotoxic activity against DFT1 cells according to the original paper @petrohilosTasmanianDevilCathelicidins2023.
+
+[@fig-gsea-cath3; @fig-gsea-cath4; @fig-gsea-cath5; @fig-gsea-cath6] show the GSEA results. Saha-CATH3, 4, and 6 all have down regulation of DNA replication (a negative enrichment score). Saha-CATH3 shows activity in immune response pathways (positive regulation of immune effector process and adaptive immune response) and inflammatory responses (negative regulation of cytokine production). Saha-CATH4 downregulates several critical biological processes and  cell proliferation pathways. Saha-CATH5 seems to be affecting mitochondrial activity and energy production, which is vital for cellular function. It also seems to be regulating developmental and signaling pathways. Saha-CATH6 regulates pathways related to ER and activates immune response pathways.  The downregulation of responses to bacterial components and chondroitin sulfate-related processes suggests a shift in the cellular focus from bacterial defense to other cellular priorities.
+
+# Conclusion
+In this study, I reproduced the results obtained in @petrohilosTasmanianDevilCathelicidins2023 and confirmed their results in pinpointing four Tasmanian devil cathelicidins (Saha-CATH3, 4, 5, and 6) that can reduce DFT1 cell viability in labratory tests. Saha-CATH3 and 4 induced cell cycle arrest, Saha-CATH5 caused oncogenic pathway inhibition, and Saha-CATH6 caused ER stress. By analyzing RNAseq data, I found that these cathelicidins may trigger inflammatory pathways in DFT1 cells like increase cytokine expression. I also included volcano plots for better visualization of differential gene expression of the conditions and further analyzed the results through Gene Set Expression Analysis and highlighted the different pathways some of which were also present in ORA of the original paper. 
+
+All in all, I successfuly reproduced the main results of the previous studies and confrimed the effect of these cathelicidins on DFTD cells.
+
+```{r load-go-analysis}
+load("go_analysis.RData")
+```
+
+```{r fig-main-figure-cath3-4-5}
+#| output: true
+#| label: fig-go345
+#| fig-cap: "GO terms downregulated in (a) SahaCATH3 treatment, (b) SahaCATH4 treatment and (c) SahaCATH5 treatment. Terms associated with cell cycle and DNA repair/checkpoints were downregulated in all three. In Saha-CATH5 treatment, terms associated with ERBB and YAP1 signalling were also downregulated."
+#| fig-subcap: 
+#|   - "SahaCATH3 treatment"
+#|   - "SahaCATH4 treatment"
+#|   - "SahaCATH5 treatment"
+#| layout-nrow: 3
+#| fig-width: 15
+#| fig-height: 5
+#| fig.env: figure*
+barplot(ego_cath3_down, font.size = 15, label_format = 200, showCategory=15)
+barplot(ego_cath4_down, font.size = 15, label_format = 200, showCategory=15)
+barplot(ego_cath5_down, font.size = 15, label_format = 200, showCategory=15)
+```
+
+```{r fig-main-figure-cath6}
+#| output: true
+#| label: fig-go6
+#| fig-cap: " GO terms (a) upregulated and (b) downregulated in Saha-CATH6 treatment. Terms associated with an immune response were upregulated. Treatment also indicated signs of ER stress."
+#| fig-subcap: 
+#|   - "SahaCATH6 treatment upregulated"
+#|   - "SahaCATH6 treatment downregulated"
+#| layout-nrow: 2
+#| fig-width: 15
+#| fig-height: 5
+#| fig.env: figure*
+barplot(ego_cath6_up, font.size = 15, label_format = 200, showCategory=15)
+barplot(ego_cath6_down, font.size = 15, label_format = 200, showCategory=15)
+```
+
+```{r volcanoplot-function}
+VolcanoPlot <- function(col_log2FC, col_fdr, fdr_cutoff, logfc_min){
+  mycol_genes <- rep_len(rgb(0.8,0.8,0.8,0.2), length(col_log2FC))
+  mycol_genes[abs(col_log2FC) > logfc_min & col_fdr < fdr_cutoff] <- rep(rgb(0.0,0.0,0.0,0.4))
+  plot(col_log2FC,-log10(col_fdr),pch=19,cex=0.3,col=mycol_genes,xlab="log2FC",ylab="-log10(P-value)",frame=FALSE, xlim = c(-7, 7), ylim = c(0, 30))
+  abline(h=-log10(fdr_cutoff),lty=2,col="grey")
+  abline(v=c(-logfc_min,logfc_min),lty=2,col="grey")
+}
+```
+
+```{r fig-volcano-plot}
+#| output: true
+#| label: fig-volcano
+#| fig-cap: " Volcano plot visualising the differentially expressed genes for (a) SahaCATH1 treatment, (b) SahaCATH2 treatment, (c) SahaCATH3 treatment, (d) SahaCATH4 treatment, (e) SahaCATH5 treatment, (f) SahaCATH6 treatment, and (g) SahaCATH7 treatment. $FDR < 0.02$ and $|logFC| > log_2(1.5)$"
+#| fig-subcap: 
+#|   - "SahaCATH1 treatment"
+#|   - "SahaCATH2 treatment"
+#|   - "SahaCATH3 treatment"
+#|   - "SahaCATH4 treatment"
+#|   - "SahaCATH5 treatment"
+#|   - "SahaCATH6 treatment"
+#|   - "SahaCATH7 treatment"
+#| layout-nrow: 4
+#| layout-ncol: 2
+#| fig.env: figure*
+
+##  Volcano plot: for each cathelicidin against the control, generate a volcano plot visualising the differentially expressed genes.
+## Use the same FDR and LFC cutoffs as described in the publication. 
+for(coef_idx in 1:length(dge_coefficients)) {
+  fdrs = dge_results[[paste0("FDR.", dge_coefficients[coef_idx])]]
+  logfcs = dge_results[[paste0("logFC.", dge_coefficients[coef_idx])]]
+  VolcanoPlot(logfcs, fdrs, 0.02, log2(1.5))
+  title(paste0("", dge_coefficients[coef_idx]))
+}
+
+```
+
+```{r run-gsea, eval=FALSE}
+#| eval: false
+
+##  Instead of performing overrepresentation analysis, use the GSEA software to
+## determine which gene sets are enriched in the cathelicidin groups. Present the top results for Saha-CATH3, 4, 5 and 6
+
+dge_coefficients_sub = dge_coefficients[c(3, 4, 5, 6)]
+gse_results = list()
+for(coef_idx in 1:length(dge_coefficients_sub)) {
+  res = data.frame(logfc = dge_results[[paste0("logFC.", dge_coefficients_sub[coef_idx])]], row.names=rownames(dge_results))
+  res <- res[order(res$logfc, decreasing = TRUE), , drop = FALSE]
+  gene_list <- res$logfc
+  names(gene_list) <- rownames(res)
+  print("Running gseGO...")
+  gse <- gseGO(
+          geneList      = gene_list,
+          OrgDb         = org.Hs.eg.db,
+          keyType       = "SYMBOL",
+          ont           = "BP",
+          pAdjustMethod = "BH",
+          pvalueCutoff  = 0.05,
+          maxGSSize     = 200)
+  gse <- clusterProfiler::simplify(gse)
+  gse_results[[dge_coefficients_sub[coef_idx]]] = gse
+}
+save(gse_results, file = "gse_results.RData")
+```
+
+```{r load-gse-results}
+load("gse_results.RData")
+```
+
+```{r fig-gse-plots3}
+#| output: true
+#| label: fig-gsea-cath3
+#| fig-cap: "Gene Set Enrichment Analysis showing enriched genes sets in SahaCATH3 treatment: a) GSEA plot b) ridge plot"
+#| fig-subcap: 
+#|   - "SahaCATH3 treatment GSEA"
+#|   - "SahaCATH3 treatment ridge plot"
+#| fig.env: figure*
+#| fig-height: 5
+#| fig-width: 10
+
+gseaplot2(gse_results$ControlvsSaha3, geneSetID = 1:15)
+ridgeplot(gse_results$ControlvsSaha3, showCategory=15, label_format = 70)
+```
+
+```{r fig-gse-plots4}
+#| output: true
+#| label: fig-gsea-cath4
+#| fig-cap: "Gene Set Enrichment Analysis showing enriched genes sets in SahaCATH4 treatment: a) GSEA plot b) ridge plot"
+#| fig-subcap: 
+#|   - "SahaCATH4 treatment GSEA"
+#|   - "SahaCATH4 treatment ridge plot"
+#| fig.env: figure*
+#| fig-height: 5
+#| fig-width: 10
+
+gseaplot2(gse_results$ControlvsSaha4, geneSetID = 1:15)
+ridgeplot(gse_results$ControlvsSaha4, showCategory=15, label_format = 70)
+```
+
+```{r fig-gse-plots5}
+#| output: true
+#| label: fig-gsea-cath5
+#| fig-cap: "Gene Set Enrichment Analysis showing enriched genes sets in SahaCATH5 treatment: a) GSEA plot b) ridge plot"
+#| fig-subcap: 
+#|   - "SahaCATH5 treatment GSEA"
+#|   - "SahaCATH5 treatment ridge plot"
+#| fig.env: figure*
+#| fig-height: 5
+#| fig-width: 10
+
+gseaplot2(gse_results$ControlvsSaha5, geneSetID = 1:15)
+ridgeplot(gse_results$ControlvsSaha5, showCategory=15, label_format = 70)
+```
+```{r fig-gse-plots6}
+#| output: true
+#| label: fig-gsea-cath6
+#| fig-cap: "Gene Set Enrichment Analysis showing enriched genes sets in SahaCATH6 treatment: a) GSEA plot b) ridge plot"
+#| fig-subcap: 
+#|   - "SahaCATH6 treatment GSEA"
+#|   - "SahaCATH6 treatment ridge plot"
+#| fig.env: figure*
+#| fig-height: 5
+#| fig-width: 10
+
+gseaplot2(gse_results$ControlvsSaha6, geneSetID = 1:15)
+ridgeplot(gse_results$ControlvsSaha6, showCategory=15, label_format = 70)
+```
