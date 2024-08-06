@@ -1,4 +1,6 @@
-# tasmanian-devil-gene-enrichment-analysis
+# Tasmanian Devil Gene Enrichment Analysis
+
+> Check out the [code](https://github.com/arashsm79/tasmanian-devil-gene-enrichment-analysis/blob/main/code.qmd) as a quarto document and the fully rendered [report](https://github.com/arashsm79/tasmanian-devil-gene-enrichment-analysis/blob/main/report.pdf)
 
 The Tasmanian devil is endangered due to Devil Facial Tumour Disease (DFTD), a contagious cancer with no current
 treatment. [Previous study](https://www.nature.com/articles/s41598-023-39901-0) has investigated the anticancer properties of Tasmanian devil cathelicidins which are an-
